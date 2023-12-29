@@ -1,0 +1,81 @@
+from pyflink.datastream import StreamExecutionEnvironment
+from pyflink.table import StreamTableEnvironment, DataTypes
+from pyflink.table.udf import udf
+from pyflink.table import EnvironmentSettings
+from pyflink.table.descriptors import Kafka, Elasticsearch, HBase
+from pyflink.table.window import Tumble
+
+# 设置流处理环境
+env_settings = EnvironmentSettings.new_instance().in_streaming_mode().use_blink_planner().build()
+env = StreamExecutionEnvironment.get_execution_environment()
+env.set_parallelism(1)  # 设置并行度
+t_env = StreamTableEnvironment.create(env, environment_settings=env_settings)
+
+# Kafka 配置
+kafka_props = {
+    'bootstrap.servers': 'your_kafka_bootstrap_servers',
+    'group.id': 'flink_consumer_group'
+}
+
+# 定义 Kafka 数据源
+t_env.connect(
+    Kafka()
+    .version('0.11')
+    .topic('your_kafka_topic')
+    .start_from_latest()
+    .properties(kafka_props)
+).with_format(
+    OldCsv()
+    .field('message', DataTypes.STRING())
+).with_schema(
+    DataTypes.FIELD('message', DataTypes.STRING())
+).create_temporary_table('KafkaSourceTable')
+
+# 定义 Elasticsearch 输出
+t_env.connect(
+    Elasticsearch()
+    .version('6')
+    .host('your_elasticsearch_host', 9200, 'http')
+    .index('your_elasticsearch_index')
+    .document_type('your_document_type')
+    .key_delimiter(',')
+).with_format(
+    OldCsv()
+    .field('message', DataTypes.STRING())
+).with_schema(
+    DataTypes.FIELD('message', DataTypes.STRING())
+).create_temporary_table('ElasticsearchSinkTable')
+
+# 定义 HBase 输出
+t_env.connect(
+    HBase()
+    .version('1.4.3')
+    .table_name('your_hbase_table')
+    .field('rowkey', DataTypes.STRING())
+    .field('message', DataTypes.STRING())
+).with_format(hbase
+    OldCsv()
+    .field('message', DataTypes.STRING())
+).with_schema(
+    DataTypes.FIELD('rowkey', DataTypes.STRING()),
+    DataTypes.FIELD('message', DataTypes.STRING())
+).in_append_mode().create_temporary_table('HBaseSinkTable')
+
+# 引用本地的自定义函数
+@udf(result_type=DataTypes.STRING())
+def process_udf(message: str):
+    # 在这里添加自定义的处理逻辑，例如数据转换、清理等
+    return message
+
+# 处理数据流
+t_env.from_path('KafkaSourceTable') \
+    .select('message') \
+    .select(process_udf('message').alias('processed_message')) \
+    .insert_into('ElasticsearchSinkTable')
+
+t_env.from_path('KafkaSourceTable') \
+    .select('message') \
+    .insert_into('HBaseSinkTable')
+
+# 执行流处理任务
+t_env.execute('Kafka to ES and HBase')
